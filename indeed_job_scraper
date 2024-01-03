@@ -1,0 +1,187 @@
+using System;
+using System.Diagnostics;
+using System.Xml;
+using System.Xml.Linq;
+using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.DevTools.V115.Profiler;
+
+class Program
+{
+
+   
+    static void Main()
+    {
+
+
+        string summaries_to_analyse = "";
+        string csvFilePath = "../../../../jobs.csv";
+        
+        //get user input
+        Console.WriteLine( "Location : " ); 
+        var target_loc = Console.ReadLine();
+
+        Console.WriteLine( "Job : " );
+        var target_job = Console.ReadLine();
+
+        if (string.IsNullOrEmpty(target_loc) || string.IsNullOrEmpty(target_job))
+        {
+            Console.WriteLine("Please input location and job.");
+            return;
+        }
+
+        //process user input and put it on url
+        string[] processing_target_job = target_job.Split(' ');
+
+        string job_string = "";
+
+
+        for (int i = 0; i < processing_target_job.Length; i++)
+        {
+
+            if (i == processing_target_job.Length - 1)
+            {
+                job_string += processing_target_job[i];
+                break;
+            }
+            job_string += processing_target_job[i] + "+";
+     
+        }
+
+
+        List<string[]> jobs = new List<string[]>();
+
+        //start the chrome driver
+        IWebDriver driver = new ChromeDriver();
+
+        driver.Manage().Window.Maximize();
+
+        
+        List<string> lists = new List<string>() {
+           $"https://ca.indeed.com/jobs?q={job_string}&l={target_loc}+ON&amp;radius=50&amp;start=10"
+        };
+      
+
+        //visit every list of page and extract job name, location, sumamries...
+        foreach (var list in lists) {
+
+            string summaries_job = " ";
+            Random random = new Random();
+            int randomDelay = random.Next(300, 1000); // Random delay between 300 and 1000 milliseconds
+            Thread.Sleep(randomDelay);
+
+            driver.Navigate().GoToUrl(list);
+
+            IReadOnlyCollection<IWebElement> jobEls = driver.FindElements((By.ClassName("job_seen_beacon")));
+            
+            foreach (IWebElement el in jobEls)
+            {
+
+                var job = el.FindElement(By.TagName("span")).GetAttribute("title");
+                
+                var final_job = "";
+                
+                if (job.Contains(","))
+                {
+                    final_job = job.Split(',')[0];
+                }
+                else
+                {
+                    final_job = job;
+                }
+
+                var companyName = el.FindElement(By.CssSelector("span[data-testid='company-name']")).Text;
+               
+                var location = el.FindElement(By.CssSelector("div[data-testid='text-location']")).Text;
+
+                var final_location = "";
+
+                if (location.Contains(","))
+                {
+                    final_location = location.Split(',')[0];
+                }
+                else {
+                    final_location = location;
+                }
+
+
+
+                var link = el.FindElement(By.TagName("a")).GetAttribute("href");
+
+                IList<IWebElement> liElements = el.FindElement(By.ClassName("job-snippet")).FindElement(By.CssSelector("ul")).FindElements(By.CssSelector("li"));
+                
+                string summaries = "";
+                
+                foreach (IWebElement liElement in liElements)
+                {
+                    string raw_bulletpt = liElement.Text;
+                    string bulletpt = "";
+                    if (raw_bulletpt.Contains(","))
+                    {
+                        bulletpt = raw_bulletpt.Replace(',', ' ');
+                    }
+                    else {
+                        bulletpt = raw_bulletpt;
+                    }
+                    summaries += " " + bulletpt;
+                   
+                    summaries_to_analyse += bulletpt;
+                   // Console.WriteLine("List Item: " + liElement.Text);
+                }
+
+
+                jobs.Add(new string[] { final_job, companyName, final_location, link,  list, summaries });
+            }
+
+
+
+        }
+
+           
+        driver.Quit();
+        //write to report
+        using (StreamWriter writer = new StreamWriter(csvFilePath))
+        {
+
+            writer.WriteLine("job, final_companyName, final_location, link,  list, summaries");
+
+            foreach (string[] job in jobs)
+            {
+                writer.WriteLine(string.Join(",", job));
+                
+            }
+        }
+        //process and analyse the top keywords
+        List<string> stopWords = new List<string> { "and", "to", "in", "of", "a", "with", "the", "work", "as","an","for","other", "or", "you", "on", "from", "have","our"};
+
+        string[] words =  summaries_to_analyse.Split(new[] { ' ', '.', ',', ';', ':', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+        words = words.Select(w => w.ToLower()).ToArray();
+        string[] filteredWords = words.Where(word => !stopWords.Contains(word)).ToArray();
+        Dictionary<string, int> wordCount = new Dictionary<string, int>();
+        foreach (string word in filteredWords)
+        {
+            if (wordCount.ContainsKey(word))
+            {
+                wordCount[word]++;
+            }
+            else
+            {
+                wordCount[word] = 1;
+            }
+        }
+
+        // Sort the dictionary by value (word frequency) in descending order
+        var sortedWordCount = wordCount.OrderByDescending(pair => pair.Value);
+
+        // Print the top 5 words
+        Console.WriteLine("Top 5 Most Popular Words:");
+        int count = 0;
+        foreach (var pair in sortedWordCount.Take(5))
+        {
+            count++;
+            Console.WriteLine($"{count}. Word: {pair.Key}, Frequency: {pair.Value}");
+        }
+    }
+
+
+}
